@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+    <header>
+        <title>load stl</title>
+        <style>
+            canvas {
+                width: 600px;
+                height: 600px;
+                border-width: 0px;
+                border-style: solid;
+                border-color: black;
+                background-color: white;
+            }
+        </style>
+    </header>
+
+    <body>
+        <div id="console">3d ear - loading</div>
+
+        <canvas id="canvas"></canvas>
+        <script id="vertex-shader" type="x-shader/x-vertex">
+            uniform mat4 u_projmat;
+            uniform mat4 u_matrix;
+            attribute vec4 a_position;
+            attribute vec3 a_color;
+            varying vec4 v_color;
+
+            void main() {
+                //gl_Position = u_projmat * u_viewmat * a_position
+                gl_Position = u_projmat * u_matrix * a_position;
+                v_color = vec4(a_color, 1.0);
+            }
+        </script>
+
+        <script id="fragment-shader" type="x-shader/x-fragment">
+            #ifdef GL_ES
+                precision mediump float;
+            #endif
+
+            varying vec4 v_color;
+
+            void main() {
+                gl_FragColor = v_color;
+            }
+        </script>
+        <script src="../m4.js"></script>
+        <script>
+
+            let scale = [1,1,1]; 
+            let rotation = [0, 3.6, 0];
+            let translation = [0, 0, 0]; 
+            let matrix = [
+                    1, 0, 0, 0,
+                    0, 1, 0, 0,
+                    0, 0, 1, 0,
+                    0, 0, 0, 1
+                ];
+            const console = document.getElementById('console');
+            const canvas = document.getElementById('canvas');
+            let index, buffer, colorArray;
+            let eventX, eventY, deltaX, deltaY;
+            let y0, y1;
+            let ifRotate;
+
+            //shaders
+            const gl = canvas.getContext("webgl");
+
+            const shaderSet = [
+                {
+                    type: gl.VERTEX_SHADER,
+                    id: "vertex-shader",
+                },
+                {
+                    type: gl.FRAGMENT_SHADER,
+                    id: "fragment-shader",
+                },
+            ];
+            const program = gl.createProgram();
+            shaderProgram = buildShaderProgram(shaderSet);
+
+            function buildShaderProgram(shaderInfo) {
+
+                shaderInfo.forEach((desc) => {
+                    const shader = compileShader(desc.id, desc.type);
+
+                    if (shader) {
+                        gl.attachShader(program, shader);
+                    }
+                });
+
+                gl.linkProgram(program);
+
+                if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+                    console.log("Error linking shader program:");
+                    console.log(gl.getProgramInfoLog(program));
+                }
+
+                return program;
+            }
+
+            function compileShader(id, type) {
+                const code = document.getElementById(id).firstChild.nodeValue;
+                const shader = gl.createShader(type);
+
+                gl.shaderSource(shader, code);
+                gl.compileShader(shader);
+
+                if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                    console.log(
+                        `Error compiling ${type === gl.VERTEX_SHADER ? "vertex" : "fragment"
+                        } shader:`,
+                    );
+                    console.log(gl.getShaderInfoLog(shader));
+                }
+                return shader;
+            }
+
+            function init(view) {
+                resizeCanvasToDisplaySize(canvas);
+                const length = view.byteLength;
+                index = (length - 80 - 4) / (4 * 3 * 4 + 2);
+                const positionsX = [];
+                const positionsY = [];
+                const positionsZ = [];
+                const positions = [];
+                const normals = [];
+
+                for (i = 0; i < index; i++) {
+                    positionsX.push(
+                        view.getFloat32(96 + 50 * i + 0, true), 
+                        view.getFloat32(96 + 50 * i + 12, true),  
+                        view.getFloat32(96 + 50 * i + 24, true),
+                    );
+                    positionsY.push(
+                        view.getFloat32(96 + 50 * i + 4, true), 
+                        view.getFloat32(96 + 50 * i + 16, true), 
+                        view.getFloat32(96 + 50 * i + 28, true), 
+                    );
+                    positionsZ.push(
+                        view.getFloat32(96 + 50 * i + 8, true), 
+                        view.getFloat32(96 + 50 * i + 20, true), 
+                        view.getFloat32(96 + 50 * i + 32, true), 
+                    );
+                    positions.push(
+                        view.getFloat32(96 + 50 * i + 0, true)-127, view.getFloat32(96 + 50 * i + 4, true), view.getFloat32(96 + 50 * i + 8, true),
+                        view.getFloat32(96 + 50 * i + 12, true)-127, view.getFloat32(96 + 50 * i + 16, true), view.getFloat32(96 + 50 * i + 20, true),
+                        view.getFloat32(96 + 50 * i + 24, true)-127, view.getFloat32(96 + 50 * i + 28, true), view.getFloat32(96 + 50 * i + 32, true),
+                        
+                    );
+                    
+                    normals.push(
+                        view.getFloat32(84 + 50 * i + 0, true) / 2 + 0.5,
+                        view.getFloat32(84 + 50 * i + 4, true) / 2 + 0.5,
+                        view.getFloat32(84 + 50 * i + 8, true) / 2 + 0.5,
+                        view.getFloat32(84 + 50 * i + 0, true) / 2 + 0.5,
+                        view.getFloat32(84 + 50 * i + 4, true) / 2 + 0.5,
+                        view.getFloat32(84 + 50 * i + 8, true) / 2 + 0.5,
+                        view.getFloat32(84 + 50 * i + 0, true) / 2 + 0.5,
+                        view.getFloat32(84 + 50 * i + 4, true) / 2 + 0.5,
+                        view.getFloat32(84 + 50 * i + 8, true) / 2 + 0.5,
+                    );
+                }
+                
+                const maxX = positionsX.reduce((a, b) => Math.max(a, b), -Infinity);
+                const minX = positionsX.reduce((a, b) => Math.min(a, b), Infinity);
+                const maxY = positionsY.reduce((a, b) => Math.max(a, b), -Infinity);
+                const minY = positionsY.reduce((a, b) => Math.min(a, b), Infinity);
+                //console.log(maxX, minX);
+                const scaleFactor = 2/Math.max(maxX,maxY);
+                //translation[0] = (minX + maxX)/2* scaleFactor;
+                translation[1] = (-minY - maxY)/2 * scaleFactor;
+                //translation[2] = -800;
+                scale = [-scaleFactor, scaleFactor, scaleFactor];
+                    
+                buffer = new Float32Array(positions);
+                //console.log(buffer);
+
+                colorArray = new Float32Array(normals);
+                //console.log(colorArray);
+                matrix = m4.translate(matrix, translation[0], translation[1], translation[2]);
+                matrix = m4.scale(matrix, scale[0], scale[1], scale[2]);
+                transform();
+
+            }
+            
+            function transform(){
+                const projMatLocation = gl.getUniformLocation(program, "u_projmat");
+                const matrixLocation = gl.getUniformLocation(program, "u_matrix");
+                const positionAttributeLocation = gl.getAttribLocation(program, "a_position");
+                const colorLocation = gl.getAttribLocation(shaderProgram, "a_color");
+                const positionBuffer = gl.createBuffer();
+                const colorBuffer = gl.createBuffer();
+                gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+                gl.bufferData(gl.ARRAY_BUFFER, buffer, gl.STATIC_DRAW);
+                gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+                gl.bufferData(gl.ARRAY_BUFFER, colorArray, gl.STATIC_DRAW);
+
+                const aspect = gl.canvas.width / gl.canvas.height;
+
+                gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+                gl.clearColor(0, 0, 0, 0);
+                gl.clear(gl.COLOR_BUFFER_BIT);//gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+                gl.enable(gl.CULL_FACE);
+                gl.enable(gl.DEPTH_TEST);
+                gl.useProgram(shaderProgram);
+
+
+                //console.log(translation);
+                
+
+                matrix = m4.xRotate(matrix, rotation[0]);
+                matrix = m4.yRotate(matrix, rotation[1]);
+                matrix = m4.zRotate(matrix, rotation[2]);
+                
+                const projmat = [
+                    1, 0, 0, 0,
+                    0, 1, 0, 0,
+                    0, 0, 1, 0,
+                    0, 0, 0, 1
+                ]; //m4.perspective(1, aspect, 1, 1000);
+                
+                gl.uniformMatrix4fv(projMatLocation, false, projmat);
+                gl.uniformMatrix4fv(matrixLocation, false, matrix);
+
+                gl.enableVertexAttribArray(colorLocation);
+                gl.bindBuffer(gl.ARRAY_BUFFER, colorBuffer);
+                gl.vertexAttribPointer(colorLocation, 3, gl.FLOAT, true, 0, 0);//attributeLocation, size, type, normalize, stride, bufferOffset
+
+                gl.enableVertexAttribArray(positionAttributeLocation);
+                gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+                gl.vertexAttribPointer(positionAttributeLocation, 3, gl.FLOAT, false, 0, 0);//attributeLocation, size, type, normalize, stride, bufferOffset
+
+                gl.drawArrays(gl.TRIANGLES, 0, index * 3); //primitiveType, offset, count
+
+            }
+            
+
+            function resizeCanvasToDisplaySize(canvas, multiplier) {
+                multiplier = multiplier || 2;
+                const width = canvas.clientWidth * multiplier | 0;
+                const height = canvas.clientHeight * multiplier | 0;
+                if (canvas.width !== width || canvas.height !== height) {
+                    canvas.width = width;
+                    canvas.height = height;
+                    aspect = width / height;
+                    return true;
+                }
+                return false;
+            }
+            
+            function loadSTL(){
+
+                //const myRequest = new Request("ear_1.stl");
+
+                window
+                  //.fetch(myRequest)
+                  .fetch("ear_1.stl")
+                  .then((response) => {
+                    if (!response.ok) {
+                      throw new Error(`HTTP error! Status: ${response.status}`);
+                    }
+                    return response.blob();
+                    console.log(response);
+                    //const blob = response.blob();
+                    //console.log(blob);
+
+                    //const reader = response.body.getReader();
+                    //const arrayBuffer = reader.readAsArrayBuffer(blob);
+                    //console.log(reader);
+                    //const view = new DataView(arrayBuffer);
+                    //init(view);
+                    }) 
+                    .then((response) => { 
+                       return response.arrayBuffer();
+                    })
+                    .then((response) => { 
+                        const arrayBuffer = response;
+                        const view = new DataView(arrayBuffer);
+                        init(view);
+                        console.innerText = 'ear loaded'
+                        //console.log(response);
+                    });
+            }
+
+
+            function zoom(e) {
+
+                event.preventDefault();
+
+                const factor = 0.0001;//e.deltaY * 0.0001;
+
+                //translation[2] -=factor;
+
+
+                scale[0] += factor;
+                //scale[1] += factor;
+                //scale[2] += factor;
+
+                transform();
+            }
+
+            function onKeyDown(e) {
+                ifRotate = e.ctrlKey;
+            }
+
+            function onMouseDown(e) {
+                event.preventDefault();
+                //console.log(e.x);
+                eventX = e.x, eventY = e.y;
+            }
+
+            function onMouseMove(e) {
+                event.preventDefault();
+                if (!eventX && !eventY) return;
+                deltaX = e.x - eventX, deltaY = e.y - eventY;
+                //if (ifRotate) {
+                    rotation[1] -= deltaX / 100;
+                    //translation = [0,0,0];
+                    //rotation[1] += deltaX / 10, rotation[2] += deltaY / 10;
+                //} else {
+                    //translation[0] += deltaX / 100, translation[1] -= deltaY / 100;
+                //}
+                transform();
+                console.log(deltaY);
+                eventX = e.x, eventY = e.y;
+            }
+
+            function onMouseUp(e) {
+                event.preventDefault();
+                //console.log('up');
+                deltaX = e.x - eventX, deltaY = e.y - eventY;
+                //console.log(deltaX, deltaY);
+                eventX = 0, eventY = 0;
+            }
+        
+            function touchstart(e) {
+
+          switch (e.targetTouches.length) {
+
+            case 1:
+
+              y0 = e.pageY;
+            console.innerText = 'rotate';
+              break;
+
+
+          }
+
+          window.addEventListener('touchmove', touchmove, false);
+          window.addEventListener('touchend', touchend, false);
+
+        }
+        
+        function touchmove(e) {
+
+          e.preventDefault();
+
+          switch (e.targetTouches.length) {
+
+            case 1:
+
+              y1 = e.pageY;
+
+              const factor = (y1 - y0) / 500;
+              rotation[1] += factor;
+            
+            transform();
+
+              y0 = y1;
+
+              break;
+
+          }
+
+        }
+
+        function touchend() {
+          window.removeEventListener('touchmove', touchmove, false);
+          window.removeEventListener('touchend', touchend, false);
+        }
+
+            window.addEventListener("load", loadSTL);
+            window.addEventListener('wheel', zoom, { passive: false });
+            window.addEventListener('keydown', onKeyDown);
+            window.addEventListener('mousedown', onMouseDown, { passive: false });
+            window.addEventListener('mousemove', onMouseMove, { passive: false });
+            window.addEventListener('mouseup', onMouseUp, { passive: false });
+            
+            window.addEventListener('touchstart', touchstart, { passive: false });
+            
+        </script>
+    </body>
+
+</html>
